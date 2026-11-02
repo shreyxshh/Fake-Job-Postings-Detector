@@ -1,0 +1,12 @@
+pandas 
+numpy 
+scikit-learn == 1.9.1
+fastapi
+uvicorn
+kagglehub
+joblib 
+ipykernel
+seaborn
+matplotlib
+jupyter
+xgboost

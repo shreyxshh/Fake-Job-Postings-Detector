@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fake Job Post Detector</title>
+<meta name="description" content="Check whether a job posting is likely to be fraudulent, using a machine-learning model trained on labelled postings.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2314232E'/%3E%3Crect x='16' y='12' width='26' height='36' rx='3' fill='%23FAFBFC'/%3E%3Ccircle cx='42' cy='42' r='10' fill='none' stroke='%23F2C230' stroke-width='5'/%3E%3Cpath d='M49 49l8 8' stroke='%23F2C230' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<!-- Fonts are optional: every font stack below has a system fallback. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  /* =====================================================================
+     1. Design tokens
+     ===================================================================== */
+  :root {
+    --page: #E7EDF0;
+    --sheet: #FAFBFC;
+    --field: #FFFFFF;
+    --ink: #14232E;
+    --ink-soft: #4A5C68;
+    --line: #C8D2D8;
+    --field-line: #8497A3;
+    --focus: #0F5D7A;
+    --marker: #F2C230;
+    --marker-hover: #F7CF55;
+    --bad: #B3261E;
+
+    --desk-text: #EAF1F4;
+    --desk-soft: #A9BBC6;
+    --ok-on-dark: #86D9B8;
+    --bad-on-dark: #FF9B8C;
+
+    --display: "Big Shoulders Display", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+    --body: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+
+    --nav-height: 60px;
+  }
+
+  /* =====================================================================
+     2. Base
+     ===================================================================== */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+  body { margin: 0; background: var(--page); color: var(--ink); font: 400 1rem/1.55 var(--body); }
+  h1, h2, h3, p, ul, ol, dl, dd, figure { margin: 0; }
+  ul, ol { padding: 0; list-style: none; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  a { color: inherit; }
+  section[id] { scroll-margin-top: calc(var(--nav-height) + 16px); }
+
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 clamp(16px, 4vw, 32px); }
+  .section { padding: clamp(36px, 6vw, 64px) 0; }
+  .section-head { margin-bottom: 24px; max-width: 62ch; }
+  .section-head h2, .block h2, .desk h2 { font: 700 clamp(1.7rem, 3.4vw, 2.3rem)/1.05 var(--display); letter-spacing: .01em; }
+  .section-head p { margin-top: 8px; color: var(--ink-soft); }
+
+  .skip-link {
+    position: absolute; left: 12px; top: -60px; z-index: 100;
+    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 6px; text-decoration: none; font-weight: 600;
+  }
+  .skip-link:focus { top: 12px; }
+
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+  /* =====================================================================
+     3. Navigation
+     ===================================================================== */
+  .nav { position: sticky; top: 0; z-index: 50; background: rgba(250, 251, 252, .96); border-bottom: 1.5px solid var(--ink); }
+  .nav-inner { display: flex; align-items: center; justify-content: space-between; height: var(--nav-height); gap: 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; font: 700 1.3rem/1 var(--display); letter-spacing: .03em; }
+  .brand svg { width: 30px; height: 30px; flex: none; }
+  .nav-links { display: flex; align-items: center; gap: 4px; }
+  .nav-links a { display: block; padding: 8px 12px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: .9375rem; color: var(--ink-soft); }
+  .nav-links a:hover { color: var(--ink); background: rgba(20, 35, 46, .07); }
+  .menu-btn { display: none; background: none; border: 1.5px solid var(--ink); border-radius: 6px; padding: 7px 9px; cursor: pointer; }
+  .menu-btn svg { display: block; width: 22px; height: 22px; }
+  @media (max-width: 760px) {
+    .menu-btn { display: block; }
+    .nav-links {
+      display: none; position: absolute; top: var(--nav-height); left: 0; right: 0;
+      flex-direction: column; align-items: stretch; gap: 0;
+      background: var(--sheet); border-bottom: 1.5px solid var(--ink); padding: 8px clamp(16px, 4vw, 32px) 12px;
+    }
+    .nav[data-open="true"] .nav-links { display: flex; }
+    .nav-links a { padding: 12px 8px; font-size: 1rem; }
+  }
+
+  /* =====================================================================
+     4. Hero
+     ===================================================================== */
+  .hero { padding: clamp(32px, 7vw, 72px) 0 clamp(28px, 5vw, 48px); }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: clamp(24px, 5vw, 56px); align-items: center; }
+  @media (max-width: 920px) { .hero-grid { grid-template-columns: minmax(0, 1fr); } }
+  .hero h1 { font: 800 clamp(2.8rem, 7.4vw, 5.2rem)/.94 var(--display); letter-spacing: -.005em; max-width: 14ch; }
+  .hero-lead { margin-top: 18px; max-width: 52ch; color: var(--ink-soft); font-size: 1.0625rem; }
+  .hero-cta { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; margin-top: 28px; }
+
+  .reads { background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 8px; padding: clamp(16px, 2.6vw, 24px); }
+  .reads h2 { font: 700 1.35rem/1.1 var(--display); letter-spacing: .01em; }
+  .reads > p { color: var(--ink-soft); font-size: .875rem; margin-top: 2px; }
+  .reads dl { margin-top: 12px; }
+  .reads .row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+  .reads dt { font-weight: 700; }
+  .reads dt span { display: block; font-weight: 400; color: var(--ink-soft); font-size: .875rem; }
+  .reads dd { color: var(--ink-soft); font-size: .875rem; align-self: center; }
+  @media (max-width: 480px) { .reads .row { grid-template-columns: minmax(0, 1fr); } }
+
+  /* =====================================================================
+     5. Buttons and form controls
+     ===================================================================== */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+    border: 2px solid var(--ink); border-radius: 6px; padding: 12px 24px;
+    font-weight: 700; font-size: 1.0625rem; cursor: pointer; text-decoration: none; background: var(--sheet);
+  }
+  .btn-primary { background: var(--marker); color: var(--ink); }
+  .btn-primary:hover { background: var(--marker-hover); }
+  .btn-plain:hover { background: #fff; }
+  .btn[disabled] { cursor: progress; opacity: .75; }
+  .spinner { width: 16px; height: 16px; border: 2.5px solid var(--ink); border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; display: none; }
+  .btn[aria-busy="true"] .spinner { display: inline-block; }
+  .link-btn { background: none; border: 0; padding: 4px; text-decoration: underline; cursor: pointer; font-weight: 600; color: var(--ink-soft); }
+  .link-btn:hover { color: var(--ink); }
+  .chip { background: var(--field); border: 1.5px solid var(--field-line); border-radius: 999px; padding: 6px 14px; font-weight: 600; font-size: .875rem; cursor: pointer; }
+  .chip:hover { border-color: var(--ink); }
+
+  .field label, .q { display: block; font-weight: 600; font-size: .9375rem; margin-bottom: 6px; }
+  .field .opt { font-weight: 400; color: var(--ink-soft); }
+  .field .meta { color: var(--ink-soft); font-size: .8125rem; margin-top: 5px; }
+  input[type="text"], textarea, select {
+    width: 100%; background: var(--field); border: 1.5px solid var(--field-line); border-radius: 6px; padding: 10px 12px; line-height: 1.45;
+  }
+  textarea { resize: vertical; min-height: 96px; }
+  textarea.tall { min-height: 168px; }
+  input[type="text"]:hover, textarea:hover, select:hover { border-color: var(--ink); }
+  input[type="text"]:focus-visible, textarea:focus-visible, select:focus-visible { outline: 3px solid var(--focus); outline-offset: 1px; border-color: var(--ink); }
+  .invalid { border-color: var(--bad) !important; }
+  .msg { color: var(--bad); font-size: .875rem; font-weight: 600; margin-top: 6px; }
+  .msg:empty { display: none; }
+
+  .qrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; padding: 14px 0; border-top: 1px solid var(--line); }
+  .qrow:first-child { border-top: 0; padding-top: 0; }
+  .qrow .q { margin: 0; }
+  .qrow .sub { color: var(--ink-soft); font-size: .8125rem; font-weight: 400; display: block; }
+  .seg { position: relative; display: inline-flex; border: 1.5px solid var(--ink); border-radius: 6px; overflow: hidden; }
+  .seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .seg label { margin: 0; padding: 8px 18px; min-width: 64px; text-align: center; cursor: pointer; background: var(--field); font-weight: 600; font-size: .9375rem; }
+  .seg label + input + label { border-left: 1.5px solid var(--ink); }
+  .seg input:checked + label { background: var(--ink); color: #fff; }
+  .seg input:focus-visible + label { outline: 3px solid var(--focus); outline-offset: -3px; }
+
+  /* =====================================================================
+     6. Analyzer: form sheet + verdict desk
+     ===================================================================== */
+  .layout { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 28px; align-items: start; }
+  @media (max-width: 920px) { .layout { grid-template-columns: minmax(0, 1fr); } }
+
+  .sheet { background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 8px; padding: clamp(18px, 3vw, 32px); }
+  .samples { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding-bottom: 22px; color: var(--ink-soft); font-size: .9375rem; }
+  .block { border-top: 1px solid var(--line); padding: 24px 0 4px; margin: 0; min-width: 0; }
+  .block .hint { color: var(--ink-soft); font-size: .9375rem; margin-top: 4px; max-width: 60ch; }
+  .fields { display: grid; gap: 18px; margin-top: 18px; padding-bottom: 20px; }
+  .fields.flush { gap: 0; }
+  .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 720px) { .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+  .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; border-top: 1px solid var(--line); padding-top: 22px; }
+  .kbd-hint { color: var(--ink-soft); font-size: .8125rem; margin-left: auto; }
+  @media (max-width: 720px) { .kbd-hint { display: none; } }
+
+  .desk { position: sticky; top: calc(var(--nav-height) + 20px); background: var(--ink); color: var(--desk-text); border-radius: 8px; padding: clamp(20px, 3vw, 30px); min-height: 360px; }
+  @media (max-width: 920px) { .desk { position: static; min-height: 0; } }
+  .desk h2 { margin-bottom: 22px; }
+  .desk .muted { color: var(--desk-soft); font-size: .9375rem; }
+  .desk p + p { margin-top: 12px; }
+
+  .stamp {
+    position: relative; display: inline-block;
+    font: 800 clamp(2rem, 4.4vw, 2.7rem)/1 var(--display); letter-spacing: .03em; text-transform: uppercase;
+    border: 4px solid currentColor; border-radius: 6px; padding: .3em .55em .26em;
+    transform: rotate(-5deg); margin: 4px 0 24px 4px;
+  }
+  .stamp::after { content: ""; position: absolute; inset: 4px; border: 1.5px solid currentColor; border-radius: 3px; opacity: .55; pointer-events: none; }
+  .stamp.bad { color: var(--bad-on-dark); }
+  .stamp.ok { color: var(--ok-on-dark); }
+  .stamp.ghost { color: var(--desk-soft); border-style: dashed; opacity: .7; font-size: clamp(1.6rem, 3.6vw, 2.1rem); }
+  .stamp.ghost::after { display: none; }
+  .stamp.land { animation: land .55s cubic-bezier(.2, .9, .3, 1.15) both; }
+
+  .readout { font-size: 1.0625rem; margin-bottom: 4px; }
+  .readout strong { font: 800 2.4rem/1 var(--display); letter-spacing: .01em; margin-right: 6px; }
+
+  .ruler { position: relative; height: 80px; margin-top: 18px; }
+  .ruler .tag { position: absolute; top: 0; transform: translateX(-50%); background: #fff; color: var(--ink); font-weight: 700; font-size: .8125rem; border-radius: 4px; padding: 2px 8px; }
+  .ruler .marker { position: absolute; top: 0; left: 0; width: 0; transition: left .95s cubic-bezier(.2, .8, .2, 1); }
+  .ruler .marker::before { content: ""; position: absolute; top: 24px; left: -1.5px; width: 3px; height: 34px; background: #fff; border-radius: 2px; }
+  .ruler .track { position: absolute; left: 0; right: 0; top: 38px; height: 14px; border-radius: 7px; overflow: hidden; display: flex; }
+  .ruler .track .low { width: 50%; background: #2C7C62; }
+  .ruler .track .high { width: 50%; background: #B5473D; }
+  .ruler .track::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0, transparent calc(10% - 1px), rgba(20, 35, 46, .75) calc(10% - 1px), rgba(20, 35, 46, .75) 10%); }
+  .ruler .flag { position: absolute; left: 50%; top: 32px; height: 26px; border-left: 2px dashed var(--desk-text); }
+  .ruler .scale span { position: absolute; top: 60px; font-size: .8125rem; color: var(--desk-soft); white-space: nowrap; }
+  .ruler .scale .s0 { left: 0; }
+  .ruler .scale .s50 { left: 50%; transform: translateX(-50%); }
+  .ruler .scale .s100 { right: 0; }
+
+  .after { margin-top: 20px; padding-top: 18px; border-top: 1px solid rgba(234, 241, 244, .22); font-size: .9375rem; }
+  .after .note { color: var(--desk-soft); }
+  .err-title { font: 700 1.3rem/1.2 var(--display); letter-spacing: .01em; margin-bottom: 6px; }
+  .indeterminate { position: relative; height: 6px; border-radius: 3px; background: rgba(234, 241, 244, .18); overflow: hidden; margin: 0 0 18px; }
+  .indeterminate span { position: absolute; top: 0; bottom: 0; width: 35%; background: var(--marker); border-radius: 3px; animation: scan 1.1s ease-in-out infinite; }
+
+  /* =====================================================================
+     7. How it works
+     ===================================================================== */
+  .steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px; }
+  @media (max-width: 820px) { .steps { grid-template-columns: minmax(0, 1fr); gap: 20px; } }
+  .steps li { border-top: 4px solid var(--ink); padding-top: 14px; }
+  .steps .n { font: 800 2rem/1 var(--display); }
+  .steps h3 { font: 700 1.3rem/1.15 var(--display); letter-spacing: .01em; margin: 6px 0 6px; }
+  .steps p { color: var(--ink-soft); font-size: .9375rem; }
+  .steps code, .footer code { font: 600 .875em/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: rgba(20, 35, 46, .08); padding: 2px 5px; border-radius: 4px; }
+  .how-note { margin-top: 24px; color: var(--ink-soft); font-size: .9375rem; max-width: 70ch; }
+
+  /* =====================================================================
+     8. Model information
+     ===================================================================== */
+  .model-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(24px, 5vw, 56px); align-items: start; }
+  @media (max-width: 820px) { .model-grid { grid-template-columns: minmax(0, 1fr); } }
+  .model-copy p { color: var(--ink-soft); }
+  .model-copy p + p { margin-top: 12px; }
+  .model-copy strong { color: var(--ink); }
+  .facts { background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 8px; padding: 6px clamp(16px, 2.6vw, 24px); }
+  .facts .row { display: flex; justify-content: space-between; gap: 16px; padding: 11px 0; border-top: 1px solid var(--line); }
+  .facts .row:first-child { border-top: 0; }
+  .facts dt { color: var(--ink-soft); }
+  .facts dd { font-weight: 700; text-align: right; }
+  .facts-source { margin-top: 10px; color: var(--ink-soft); font-size: .8125rem; }
+
+  /* =====================================================================
+     9. Session history
+     ===================================================================== */
+  .history-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
+  .history-bar p { color: var(--ink-soft); font-size: .875rem; max-width: 62ch; }
+  .history-list { background: var(--sheet); border: 1.5px solid var(--ink); border-radius: 8px; }
+  .history-item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 6px 16px; padding: 12px clamp(14px, 2.4vw, 20px); border-top: 1px solid var(--line); }
+  .history-item:first-child { border-top: 0; }
+  .history-item .t { font-weight: 600; overflow-wrap: anywhere; }
+  .history-item .sub { display: block; color: var(--ink-soft); font-size: .8125rem; font-weight: 400; }
+  .history-item .res { font-weight: 700; text-align: right; }
+  .history-item .res.bad { color: var(--bad); }
+  .history-item .res.ok { color: #17694F; }
+  .history-empty { padding: 20px; color: var(--ink-soft); }
+  @media (max-width: 640px) { .history-item { grid-template-columns: minmax(0, 1fr) auto; } .history-item .act { grid-column: 1 / -1; } }
+
+  /* =====================================================================
+     10. Footer
+     ===================================================================== */
+  .footer { margin-top: 24px; border-top: 1.5px solid var(--ink); padding: 28px 0 48px; color: var(--ink-soft); font-size: .875rem; }
+  .footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px 32px; }
+  .footer p { max-width: 62ch; }
+  .footer strong { color: var(--ink); }
+
+  /* =====================================================================
+     11. Motion
+     ===================================================================== */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes scan { 0% { left: -35%; } 100% { left: 100%; } }
+  @keyframes land {
+    0% { opacity: 0; transform: rotate(-14deg) scale(1.8); }
+    55% { opacity: 1; }
+    100% { opacity: 1; transform: rotate(-5deg) scale(1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .stamp.land, .spinner, .indeterminate span { animation: none; }
+    .ruler .marker { transition: none; }
+    .indeterminate span { width: 100%; left: 0; }
+  }
+</style>
+</head>
+
+<body>
+<a class="skip-link" href="#analyze">Skip to the analyzer</a>
+
+<!-- ===================================================================
+     Navigation
+     =================================================================== -->
+<header class="nav" id="nav" data-open="false">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Fake Job Post Detector, back to top">
+      <svg viewBox="0 0 64 64" aria-hidden="true" focusable="false">
+        <rect width="64" height="64" rx="12" fill="#14232E"/>
+        <rect x="16" y="12" width="26" height="36" rx="3" fill="#FAFBFC"/>
+        <circle cx="42" cy="42" r="10" fill="none" stroke="#F2C230" stroke-width="5"/>
+        <path d="M49 49l8 8" stroke="#F2C230" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+      <span>Fake Job Post Detector</span>
+    </a>
+    <button class="menu-btn" id="menu-btn" type="button" aria-expanded="false" aria-controls="nav-links" aria-label="Open menu">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false">
+        <path d="M4 7h16M4 12h16M4 17h16"/>
+      </svg>
+    </button>
+    <nav aria-label="Main">
+      <ul class="nav-links" id="nav-links">
+        <li><a href="#analyze">Analyze</a></li>
+        <li><a href="#how">How it works</a></li>
+        <li><a href="#model">Model</a></li>
+        <li><a href="#history">History</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- =================================================================
+       Hero
+       ================================================================= -->
+  <section class="hero" aria-labelledby="hero-title">
+    <div class="wrap hero-grid">
+      <div>
+        <h1 id="hero-title">Check a job posting before you apply.</h1>
+        <p class="hero-lead">Enter what the listing says and how it looks. A machine-learning model trained on labelled job postings estimates the probability that the listing is fraudulent.</p>
+        <div class="hero-cta">
+          <a class="btn btn-primary" href="#analyze">Analyze a posting</a>
+          <a class="link-btn" href="#how">See how it works</a>
+        </div>
+      </div>
+
+      <!-- Describes the model's inputs; it does not display any prediction. -->
+      <div class="reads">
+        <h2>What the model reads</h2>
+        <p>The same fields you fill in below.</p>
+        <dl>
+          <div class="row">
+            <dt>Posting text<span>Title, company profile, description, requirements</span></dt>
+            <dd>Joined into one text and turned into word counts.</dd>
+          </div>
+          <div class="row">
+            <dt>Posting details<span>Employment type, experience level, education</span></dt>
+            <dd>Each option is encoded as its own yes-or-no feature.</dd>
+          </div>
+          <div class="row">
+            <dt>Listing signals<span>Remote work, company logo, screening questions</span></dt>
+            <dd>Passed in as 0 or 1.</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       Analyzer
+       ================================================================= -->
+  <section class="section" id="analyze" aria-labelledby="analyze-title" style="padding-top:8px">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="analyze-title">Analyze a posting</h2>
+        <p>Copy the details from the listing into the form. Nothing is sent until you choose Check posting.</p>
+      </div>
+
+      <div class="layout">
+        <form id="form" class="sheet" novalidate autocomplete="off">
+          <div class="samples">
+            <span>Fill the form with an example input:</span>
+            <button type="button" class="chip" data-sample="typical">Typical posting</button>
+            <button type="button" class="chip" data-sample="suspicious">Suspicious-looking posting</button>
+          </div>
+
+          <section class="block" aria-labelledby="h-text">
+            <h2 id="h-text">Posting text</h2>
+            <p class="hint">Only the job title is required. More text gives the model more to work with.</p>
+            <div class="fields">
+              <div class="field">
+                <label for="title">Job title <span class="opt">(required)</span></label>
+                <input type="text" id="title" name="title" placeholder="e.g. Data Analyst, Customer Insights" aria-describedby="title-msg">
+                <div class="msg" id="title-msg" role="alert"></div>
+              </div>
+              <div class="field">
+                <label for="company_profile">Company profile</label>
+                <textarea id="company_profile" name="company_profile" placeholder="What the posting says about the employer" aria-describedby="count-company_profile"></textarea>
+                <div class="meta" id="count-company_profile" data-count-for="company_profile">0 words, 0 characters</div>
+              </div>
+              <div class="field">
+                <label for="description">Job description</label>
+                <textarea id="description" name="description" class="tall" placeholder="Responsibilities, duties and what the day-to-day work looks like" aria-describedby="count-description"></textarea>
+                <div class="meta" id="count-description" data-count-for="description">0 words, 0 characters</div>
+              </div>
+              <div class="field">
+                <label for="requirements">Requirements</label>
+                <textarea id="requirements" name="requirements" placeholder="Skills, experience and qualifications" aria-describedby="count-requirements"></textarea>
+                <div class="meta" id="count-requirements" data-count-for="requirements">0 words, 0 characters</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="block" aria-labelledby="h-details">
+            <h2 id="h-details">Posting details</h2>
+            <p class="hint">Leave a field as Unknown if the listing doesn’t say.</p>
+            <div class="fields grid-3">
+              <div class="field">
+                <label for="employment_type">Employment type</label>
+                <select id="employment_type" name="employment_type">
+                  <option value="Unknown">Unknown</option>
+                  <option value="Full-time">Full-time</option>
+                  <option value="Contract">Contract</option>
+                  <option value="Part-time">Part-time</option>
+                  <option value="Temporary">Temporary</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="required_experience">Experience level</label>
+                <select id="required_experience" name="required_experience">
+                  <option value="Unknown">Unknown</option>
+                  <option value="Internship">Internship</option>
+                  <option value="Entry level">Entry level</option>
+                  <option value="Associate">Associate</option>
+                  <option value="Mid-Senior level">Mid-Senior level</option>
+                  <option value="Director">Director</option>
+                  <option value="Executive">Executive</option>
+                  <option value="Not Applicable">Not Applicable</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="required_education">Education required</label>
+                <select id="required_education" name="required_education">
+                  <option value="Unknown">Unknown</option>
+                  <option value="Unspecified">Unspecified</option>
+                  <option value="Some High School Coursework">Some High School Coursework</option>
+                  <option value="High School or equivalent">High School or equivalent</option>
+                  <option value="Vocational">Vocational</option>
+                  <option value="Vocational - HS Diploma">Vocational - HS Diploma</option>
+                  <option value="Vocational - Degree">Vocational - Degree</option>
+                  <option value="Certification">Certification</option>
+                  <option value="Some College Coursework Completed">Some College Coursework Completed</option>
+                  <option value="Associate Degree">Associate Degree</option>
+                  <option value="Bachelor's Degree">Bachelor's Degree</option>
+                  <option value="Master's Degree">Master's Degree</option>
+                  <option value="Professional">Professional</option>
+                  <option value="Doctorate">Doctorate</option>
+                </select>
+              </div>
+            </div>
+          </section>
+
+          <section class="block" aria-labelledby="h-signals">
+            <h2 id="h-signals">What the listing shows</h2>
+            <p class="hint">Answer each question from the listing as you see it.</p>
+            <div class="fields flush">
+              <div class="qrow">
+                <div class="q" id="q-tele">Remote work allowed<span class="sub">The role can be done from home</span></div>
+                <div class="seg" role="radiogroup" aria-labelledby="q-tele">
+                  <input type="radio" id="tele-1" name="telecommuting" value="1"><label for="tele-1">Yes</label>
+                  <input type="radio" id="tele-0" name="telecommuting" value="0"><label for="tele-0">No</label>
+                </div>
+              </div>
+              <div class="qrow">
+                <div class="q" id="q-logo">Company logo shown<span class="sub">The listing displays the employer’s logo</span></div>
+                <div class="seg" role="radiogroup" aria-labelledby="q-logo">
+                  <input type="radio" id="logo-1" name="has_company_logo" value="1"><label for="logo-1">Yes</label>
+                  <input type="radio" id="logo-0" name="has_company_logo" value="0"><label for="logo-0">No</label>
+                </div>
+              </div>
+              <div class="qrow">
+                <div class="q" id="q-ques">Screening questions asked<span class="sub">Applicants answer questions when they apply</span></div>
+                <div class="seg" role="radiogroup" aria-labelledby="q-ques">
+                  <input type="radio" id="ques-1" name="has_question" value="1"><label for="ques-1">Yes</label>
+                  <input type="radio" id="ques-0" name="has_question" value="0"><label for="ques-0">No</label>
+                </div>
+              </div>
+              <div class="msg" id="signals-msg" role="alert"></div>
+            </div>
+          </section>
+
+          <div class="actions">
+            <button type="submit" class="btn btn-primary" id="submit-btn" aria-busy="false">
+              <span class="spinner" aria-hidden="true"></span>
+              <span id="submit-label">Check posting</span>
+            </button>
+            <button type="button" class="link-btn" id="clear-btn">Clear form</button>
+            <span class="kbd-hint">Ctrl + Enter to check</span>
+          </div>
+        </form>
+
+        <aside class="desk" aria-labelledby="h-verdict">
+          <h2 id="h-verdict">Verdict</h2>
+          <div id="verdict" role="status" aria-live="polite"></div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       How it works
+       ================================================================= -->
+  <section class="section" id="how" aria-labelledby="how-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="how-title">How it works</h2>
+        <p>The prediction is made on the server. This page only collects the form and shows the response.</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="n" aria-hidden="true">1</span>
+          <h3>You enter the listing</h3>
+          <p>The form collects the posting text, three details and three yes-or-no signals. The job title is the only required field.</p>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">2</span>
+          <h3>The page asks the API</h3>
+          <p>Your browser sends the fields as JSON to <code>POST /predict</code> on your FastAPI backend, which passes them to the trained model.</p>
+        </li>
+        <li>
+          <span class="n" aria-hidden="true">3</span>
+          <h3>The model returns a probability</h3>
+          <p>The API replies with a fraud probability and a label. A posting is labelled fraudulent when the probability is above 50%.</p>
+        </li>
+      </ol>
+      <p class="how-note">The trained model file is never loaded in the browser, and the backend does not store what you submit.</p>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       Model information
+       ================================================================= -->
+  <section class="section" id="model" aria-labelledby="model-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="model-title">About the model</h2>
+      </div>
+      <div class="model-grid">
+        <div class="model-copy">
+          <p>The model is a <strong>logistic regression</strong> with balanced class weights, trained on a dataset of 17,880 job postings in which about 4.8% are labelled fraudulent.</p>
+          <p>It counts the words in the posting text, encodes the three category fields, and uses the three yes-or-no signals as they are. It does not look up the company, check links or verify anything outside the text you give it.</p>
+          <p><strong>Read the result as an estimate.</strong> In the notebook’s test split, roughly 1 in 4 postings the model flagged were genuine, and about 1 in 6 fraudulent postings were missed. Verify the employer independently before sharing personal details.</p>
+        </div>
+        <div>
+          <dl class="facts">
+            <div class="row"><dt>Postings in the dataset</dt><dd>17,880</dd></div>
+            <div class="row"><dt>Test postings (20% split)</dt><dd>3,576</dd></div>
+            <div class="row"><dt>Fraudulent in test split</dt><dd>181</dd></div>
+            <div class="row"><dt>Overall accuracy</dt><dd>97.9%</dd></div>
+            <div class="row"><dt>Fraud precision</dt><dd>0.77</dd></div>
+            <div class="row"><dt>Fraud recall</dt><dd>0.83</dd></div>
+            <div class="row"><dt>Fraud F1 score</dt><dd>0.80</dd></div>
+          </dl>
+          <p class="facts-source">Figures copied from the training notebook’s evaluation on a single random split. This page does not recalculate them.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- =================================================================
+       Session history
+       ================================================================= -->
+  <section class="section" id="history" aria-labelledby="history-title">
+    <div class="wrap">
+      <div class="section-head">
+        <h2 id="history-title">Checks in this session</h2>
+      </div>
+      <div class="history-bar">
+        <p>Saved only in this browser tab (session storage) and cleared when the tab closes. The backend keeps no record of your checks.</p>
+        <button type="button" class="link-btn" id="clear-history-btn">Clear history</button>
+      </div>
+      <ul class="history-list" id="history-list" aria-live="polite"></ul>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap">
+    <p><strong>Fake Job Post Detector.</strong> A machine-learning project that estimates whether a job posting is fraudulent. Results are estimates, not confirmed findings.</p>
+    <p>Predictions come from the model running behind <code>POST /predict</code>.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ===================================================================
+     1. Configuration
+     ===================================================================
+     app.py is a FastAPI app that serves this page at "/" and exposes
+     POST /predict. Because the page is served by the same server, an empty
+     base URL (same origin) is correct and needs no CORS configuration.
+
+     If you open this file directly (file://) the browser has no origin to
+     reuse, so the page falls back to uvicorn's default address. That case
+     requires CORS to be enabled on the backend (see the README notes).
+     Change API_BASE_URL if you run the backend on another host or port.     */
+  var DEFAULT_LOCAL_BACKEND = 'http://127.0.0.1:8000';
+  var API_BASE_URL = window.location.protocol === 'file:' ? DEFAULT_LOCAL_BACKEND : '';
+  var PREDICT_PATH = '/predict';
+  var REQUEST_TIMEOUT_MS = 30000;
+  var HISTORY_KEY = 'fake-job-detector-history-v1';
+  var HISTORY_LIMIT = 10;
+  var BORDERLINE_MARGIN_PCT = 15;   // within this many points of the 50% line counts as close
+  var SHORT_TEXT_WORDS = 60;        // fewer words than this gives the model little to go on
+
+  /* ===================================================================
+     2. DOM references
+     =================================================================== */
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $('form');
+  var verdictEl = $('verdict');
+  var submitBtn = $('submit-btn');
+  var submitLabel = $('submit-label');
+  var titleInput = $('title');
+  var titleMsg = $('title-msg');
+  var signalsMsg = $('signals-msg');
+  var historyList = $('history-list');
+  var nav = $('nav');
+  var menuBtn = $('menu-btn');
+
+  var prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var isSubmitting = false;
+
+  /* ===================================================================
+     3. Example inputs (only fill the form; they are not predictions)
+     =================================================================== */
+  var SAMPLES = {
+    typical: {
+      title: 'Data Analyst, Customer Insights',
+      company_profile: 'Northfield Freight Systems builds route-planning software used by regional carriers and retailers. We are 400 people across offices in Pune, Austin and Rotterdam, and we publish our engineering blog and open roles on our company website.',
+      description: 'You will join the Customer Insights team to analyse shipment and usage data, build dashboards in SQL and Python, and present findings to product managers each sprint. You will work with the data engineering group on new metrics, document how each metric is calculated, and help customers understand their own reports during quarterly reviews.',
+      requirements: 'Two or more years of experience in an analytics role. Strong SQL, working knowledge of Python or R, and experience with a BI tool such as Tableau or Power BI. A bachelor\u2019s degree in a quantitative field or equivalent experience.',
+      employment_type: 'Full-time',
+      required_experience: 'Mid-Senior level',
+      required_education: "Bachelor's Degree",
+      telecommuting: 0, has_company_logo: 1, has_question: 1
+    },
+    suspicious: {
+      title: 'Administrative Assistant - Work From Home, Start Immediately',
+      company_profile: '',
+      description: 'We are a growing company looking for people to work from home. Earn $4,500 per week with no experience needed. Weekly pay. Duties include data entry, typing and answering emails. Positions are limited, so apply today and a manager will contact you by text.',
+      requirements: 'Computer with internet access. Must be 18 or older. Entry level candidates are encouraged to apply.',
+      employment_type: 'Part-time',
+      required_experience: 'Entry level',
+      required_education: 'High School or equivalent',
+      telecommuting: 1, has_company_logo: 0, has_question: 0
+    }
+  };
+
+  var TEXT_FIELDS = ['title', 'company_profile', 'description', 'requirements'];
+  var SELECT_FIELDS = ['employment_type', 'required_experience', 'required_education'];
+  var FLAG_FIELDS = ['telecommuting', 'has_company_logo', 'has_question'];
+
+  /* ===================================================================
+     4. Small DOM helper (builds nodes with textContent, never innerHTML,
+        so user text and backend responses cannot inject markup)
+     =================================================================== */
+  function el(tag, props) {
+    var node = document.createElement(tag);
+    if (props) {
+      Object.keys(props).forEach(function (key) {
+        var value = props[key];
+        if (key === 'class') node.className = value;
+        else if (key === 'text') node.textContent = value;
+        else if (key === 'role' || key === 'style' || key.indexOf('aria-') === 0 || key.indexOf('data-') === 0) node.setAttribute(key, value);
+        else node[key] = value;
+      });
+    }
+    for (var i = 2; i < arguments.length; i++) {
+      var child = arguments[i];
+      if (child === null || child === undefined) continue;
+      node.appendChild(typeof child === 'object' ? child : document.createTextNode(String(child)));
+    }
+    return node;
+  }
+
+  function wordCount(text) {
+    var trimmed = text.trim();
+    return trimmed ? trimmed.split(/\s+/).length : 0;
+  }
+
+  function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
+
+  /* ===================================================================
+     5. Form reading, writing and validation
+     =================================================================== */
+  function checkedFlag(name) {
+    var checked = form.querySelector('input[name="' + name + '"]:checked');
+    return checked ? Number(checked.value) : null;
+  }
+
+  // Builds the JSON body using exactly the field names of the Pydantic model in app.py.
+  function readPayload() {
+    var payload = {};
+    TEXT_FIELDS.forEach(function (name) { payload[name] = form.elements[name].value.trim(); });
+    SELECT_FIELDS.forEach(function (name) { payload[name] = form.elements[name].value; });
+    FLAG_FIELDS.forEach(function (name) { payload[name] = checkedFlag(name); });
+    return payload;
+  }
+
+  function writePayload(payload) {
+    TEXT_FIELDS.concat(SELECT_FIELDS).forEach(function (name) { form.elements[name].value = payload[name]; });
+    FLAG_FIELDS.forEach(function (name) {
+      var radio = form.querySelector('input[name="' + name + '"][value="' + payload[name] + '"]');
+      if (radio) radio.checked = true;
+    });
+    clearValidationMessages();
+    updateCounters();
+  }
+
+  function clearValidationMessages() {
+    titleMsg.textContent = '';
+    titleInput.classList.remove('invalid');
+    titleInput.removeAttribute('aria-invalid');
+    signalsMsg.textContent = '';
+  }
+
+  // Returns true when the form can be sent; otherwise shows what to fix and focuses it.
+  function validateForm() {
+    clearValidationMessages();
+    if (!titleInput.value.trim()) {
+      titleMsg.textContent = 'Enter the job title.';
+      titleInput.classList.add('invalid');
+      titleInput.setAttribute('aria-invalid', 'true');
+      titleInput.focus();
+      return false;
+    }
+    var unanswered = FLAG_FIELDS.filter(function (name) { return checkedFlag(name) === null; });
+    if (unanswered.length) {
+      signalsMsg.textContent = 'Choose Yes or No for each of the three questions.';
+      form.querySelector('input[name="' + unanswered[0] + '"]').focus();
+      return false;
+    }
+    return true;
+  }
+
+  function updateCounters() {
+    document.querySelectorAll('[data-count-for]').forEach(function (counter) {
+      var text = $(counter.getAttribute('data-count-for')).value;
+      counter.textContent = plural(wordCount(text), 'word') + ', ' + plural(text.length, 'character');
+    });
+  }
+
+  /* ===================================================================
+     6. API communication
+     =================================================================== */
+  function ApiError(status, detail) {
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+  ApiError.prototype = Object.create(Error.prototype);
+
+  // FastAPI reports validation problems (HTTP 422) as {detail: [{loc, msg}, ...]}.
+  async function readErrorDetail(response) {
+    try {
+      var body = await response.json();
+      if (Array.isArray(body.detail)) {
+        return body.detail.map(function (item) {
+          var field = (item.loc || []).slice(1).join('.');
+          return (field ? field + ': ' : '') + item.msg;
+        }).join('; ');
+      }
+      return typeof body.detail === 'string' ? body.detail : '';
+    } catch (e) {
+      return '';   // body was not JSON (for example a plain "Internal Server Error")
+    }
+  }
+
+  // The API must answer {fraudulent: 0 | 1, probability: number between 0 and 1}.
+  function assertValidPrediction(data) {
+    var valid = data && (data.fraudulent === 0 || data.fraudulent === 1) &&
+      typeof data.probability === 'number' && data.probability >= 0 && data.probability <= 1;
+    if (!valid) throw new ApiError(200, 'The response did not have the expected shape.');
+  }
+
+  async function requestPrediction(payload) {
+    var controller = new AbortController();
+    var timer = setTimeout(function () { controller.abort(); }, REQUEST_TIMEOUT_MS);
+    try {
+      var response = await fetch(API_BASE_URL + PREDICT_PATH, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: controller.signal
+      });
+      if (!response.ok) throw new ApiError(response.status, await readErrorDetail(response));
+      var data = await response.json();
+      assertValidPrediction(data);
+      return data;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Turns any failure into a short, safe message. Raw server output is never shown.
+  function describeFailure(error) {
+    if (error instanceof ApiError) {
+      if (error.status === 422) {
+        return ['The server rejected the form data', error.detail || 'One of the fields could not be read. Check the values and try again.'];
+      }
+      if (error.status === 200) {
+        return ['The server sent an unexpected reply', 'The prediction could not be read. Check that the API returns "fraudulent" and "probability".'];
+      }
+      return ['The server could not score this posting', 'The API answered with status ' + error.status + '. Check the backend terminal for the cause, then try again.'];
+    }
+    if (error && error.name === 'AbortError') {
+      return ['The request took too long', 'The API did not answer within ' + (REQUEST_TIMEOUT_MS / 1000) + ' seconds. Check that the backend is running, then try again.'];
+    }
+    if (window.location.protocol === 'file:') {
+      return ['Open the page through the backend', 'Start the FastAPI server and open ' + DEFAULT_LOCAL_BACKEND + ' instead of opening this file directly.'];
+    }
+    return ['Couldn\u2019t reach the backend', 'Check that the FastAPI server is running and that this page is served from it, then try again.'];
+  }
+
+  /* ===================================================================
+     7. Verdict panel rendering
+     =================================================================== */
+  function showInPanel() {
+    verdictEl.replaceChildren.apply(verdictEl, arguments);
+  }
+
+  function renderEmpty() {
+    showInPanel(
+      el('div', { class: 'stamp ghost', text: 'No verdict yet' }),
+      el('p', { class: 'muted', text: 'Fill in the posting, then choose Check posting. The verdict and fraud probability appear here.' })
+    );
+  }
+
+  function renderLoading() {
+    showInPanel(
+      el('div', { class: 'stamp ghost', text: 'Analyzing' }),
+      el('div', { class: 'indeterminate', 'aria-hidden': 'true' }, el('span')),
+      el('p', { class: 'muted', text: 'Waiting for the model to score the posting.' })
+    );
+  }
+
+  function renderError(title, message) {
+    showInPanel(
+      el('div', { class: 'stamp ghost', text: 'No verdict' }),
+      el('h3', { class: 'err-title', text: title }),
+      el('p', { class: 'muted', text: message + ' Your input is still in the form.' })
+    );
+  }
+
+  function buildRuler(percent) {
+    var marker = el('div', { class: 'marker', style: 'left:0%' }, el('span', { class: 'tag', text: percent + '%' }));
+    var ruler = el('div', {
+      class: 'ruler', role: 'img',
+      'aria-label': 'Fraud probability ' + percent + ' percent on a scale from 0 to 100. The flag line is at 50 percent.'
+    },
+      el('div', { class: 'track' }, el('span', { class: 'low' }), el('span', { class: 'high' })),
+      el('div', { class: 'flag' }),
+      marker,
+      el('div', { class: 'scale' },
+        el('span', { class: 's0', text: '0%' }),
+        el('span', { class: 's50', text: '50% flag line' }),
+        el('span', { class: 's100', text: '100%' }))
+    );
+    // Two animation frames so the browser paints the marker at 0% first, then transitions.
+    var moveMarker = function () { marker.style.left = percent + '%'; };
+    if (prefersReducedMotion) moveMarker();
+    else requestAnimationFrame(function () { requestAnimationFrame(moveMarker); });
+    return ruler;
+  }
+
+  function renderResult(prediction, wordsInPosting) {
+    var isFraud = prediction.fraudulent === 1;
+    var percent = Math.round(prediction.probability * 100);
+
+    var notes = [];
+    if (Math.abs(percent - 50) <= BORDERLINE_MARGIN_PCT) {
+      notes.push('This score is close to the 50% line, so treat it as uncertain.');
+    }
+    if (wordsInPosting < SHORT_TEXT_WORDS) {
+      notes.push('The posting text is short, which gives the model less to go on.');
+    }
+
+    var advice = isFraud
+      ? 'General advice: don\u2019t send personal documents or pay any fee. Find the company on its own website and contact it using the details published there.'
+      : 'General advice: a low score is not a guarantee. Before sharing personal details, confirm the role appears on the company\u2019s own careers page.';
+
+    var after = el('div', { class: 'after' }, el('p', { text: advice }));
+    if (notes.length) after.appendChild(el('p', { class: 'note', text: notes.join(' ') }));
+    after.appendChild(el('p', { class: 'note', text: 'The server rounds the probability to two decimals and labels a posting fraudulent above 50%.' }));
+
+    showInPanel(
+      el('div', { class: 'stamp land ' + (isFraud ? 'bad' : 'ok'), text: isFraud ? 'Likely fraudulent' : 'Looks legitimate' }),
+      el('p', { class: 'readout' }, el('strong', { text: percent + '%' }), 'estimated chance this posting is fraudulent'),
+      buildRuler(percent),
+      after
+    );
+  }
+
+  /* ===================================================================
+     8. Session history (browser tab only, via sessionStorage)
+     =================================================================== */
+  var checkHistory = loadHistory();
+
+  function loadHistory() {
+    try {
+      var stored = JSON.parse(sessionStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(stored) ? stored : [];
+    } catch (e) {
+      return [];   // storage unavailable or corrupted: start with an empty history
+    }
+  }
+
+  function saveHistory() {
+    try { sessionStorage.setItem(HISTORY_KEY, JSON.stringify(checkHistory)); } catch (e) { /* history just won't persist */ }
+  }
+
+  function addToHistory(payload, prediction) {
+    checkHistory.unshift({ at: Date.now(), payload: payload, fraudulent: prediction.fraudulent, probability: prediction.probability });
+    checkHistory = checkHistory.slice(0, HISTORY_LIMIT);
+    saveHistory();
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (!checkHistory.length) {
+      historyList.replaceChildren(el('li', { class: 'history-empty', text: 'No checks yet in this tab. Results will be listed here after you analyze a posting.' }));
+      return;
+    }
+    var rows = checkHistory.map(function (entry, index) {
+      var time = new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      var isFraud = entry.fraudulent === 1;
+      var restore = el('button', { type: 'button', class: 'link-btn', text: 'Load into form', 'data-history-index': String(index) });
+      return el('li', { class: 'history-item' },
+        el('div', { class: 't' }, entry.payload.title, el('span', { class: 'sub', text: 'Checked at ' + time })),
+        el('div', { class: 'res ' + (isFraud ? 'bad' : 'ok'), text: (isFraud ? 'Likely fraudulent' : 'Looks legitimate') + ', ' + Math.round(entry.probability * 100) + '%' }),
+        el('div', { class: 'act' }, restore)
+      );
+    });
+    historyList.replaceChildren.apply(historyList, rows);
+  }
+
+  /* ===================================================================
+     9. Submit flow
+     =================================================================== */
+  function setBusy(busy) {
+    isSubmitting = busy;
+    submitBtn.disabled = busy;
+    submitBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+    submitLabel.textContent = busy ? 'Analyzing' : 'Check posting';
+  }
+
+  async function handleSubmit() {
+    if (isSubmitting) return;          // ignore repeat clicks and shortcuts while a request is running
+    if (!validateForm()) return;
+
+    var payload = readPayload();
+    var wordsInPosting = wordCount(TEXT_FIELDS.map(function (name) { return payload[name]; }).join(' '));
+
+    setBusy(true);
+    renderLoading();
+    try {
+      var prediction = await requestPrediction(payload);
+      renderResult(prediction, wordsInPosting);
+      addToHistory(payload, prediction);
+      // On narrow screens the verdict sits below the form, so bring it into view.
+      if (window.matchMedia('(max-width: 920px)').matches) {
+        document.querySelector('.desk').scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+      }
+    } catch (error) {
+      var message = describeFailure(error);
+      renderError(message[0], message[1]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /* ===================================================================
+     10. Event wiring
+     =================================================================== */
+  form.addEventListener('submit', function (event) { event.preventDefault(); handleSubmit(); });
+
+  form.addEventListener('input', function (event) {
+    if (event.target === titleInput && titleInput.value.trim()) {
+      titleMsg.textContent = '';
+      titleInput.classList.remove('invalid');
+      titleInput.removeAttribute('aria-invalid');
+    }
+    if (event.target.type === 'radio') signalsMsg.textContent = '';
+    updateCounters();
+  });
+
+  form.addEventListener('keydown', function (event) {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); handleSubmit(); }
+  });
+
+  document.querySelectorAll('[data-sample]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      writePayload(SAMPLES[button.getAttribute('data-sample')]);
+      renderEmpty();
+    });
+  });
+
+  $('clear-btn').addEventListener('click', function () {
+    form.reset();
+    clearValidationMessages();
+    updateCounters();
+    renderEmpty();
+    titleInput.focus();
+  });
+
+  historyList.addEventListener('click', function (event) {
+    var button = event.target.closest('[data-history-index]');
+    if (!button) return;
+    var entry = checkHistory[Number(button.getAttribute('data-history-index'))];
+    if (!entry) return;
+    writePayload(entry.payload);
+    renderEmpty();
+    $('analyze').scrollIntoView({ behavior: prefersReducedMotion ? 'auto' : 'smooth', block: 'start' });
+  });
+
+  $('clear-history-btn').addEventListener('click', function () {
+    checkHistory = [];
+    saveHistory();
+    renderHistory();
+  });
+
+  // Mobile navigation
+  function setMenu(open) {
+    nav.setAttribute('data-open', open ? 'true' : 'false');
+    menuBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    menuBtn.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  }
+  menuBtn.addEventListener('click', function () { setMenu(nav.getAttribute('data-open') !== 'true'); });
+  document.querySelectorAll('.nav-links a').forEach(function (link) {
+    link.addEventListener('click', function () { setMenu(false); });
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && nav.getAttribute('data-open') === 'true') { setMenu(false); menuBtn.focus(); }
+  });
+
+  /* ===================================================================
+     11. Initial render
+     =================================================================== */
+  updateCounters();
+  renderEmpty();
+  renderHistory();
+})();
+</script>
+</body>
+</html>
